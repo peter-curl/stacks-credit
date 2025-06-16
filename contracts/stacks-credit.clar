@@ -301,3 +301,67 @@
     (ok true)
   )
 )
+
+;; Update User Active Loans
+;; Efficient management of user's concurrent loan portfolio
+(define-private (update-user-loans
+    (user principal)
+    (loan-id uint)
+  )
+  (let ((user-loans (default-to { active-loans: (list) } (map-get? UserLoans { user: user }))))
+    (map-set UserLoans { user: user } { 
+      active-loans: (unwrap! (as-max-len? (append (get active-loans user-loans) loan-id) u20)
+        ERR-ACTIVE-LOAN
+      ) 
+    })
+    (ok true)
+  )
+)
+
+;; READ-ONLY QUERY FUNCTIONS
+
+;; Get User Credit Score
+;; Comprehensive credit profile retrieval for analytics and decisions
+(define-read-only (get-user-score (user principal))
+  (map-get? UserScores { user: user })
+)
+
+;; Get Loan Details
+;; Complete loan information retrieval for monitoring and management
+(define-read-only (get-loan (loan-id uint))
+  (map-get? Loans { loan-id: loan-id })
+)
+
+;; Get User Active Loans
+;; Active loan portfolio overview for borrowers and analytics
+(define-read-only (get-user-active-loans (user principal))
+  (map-get? UserLoans { user: user })
+)
+
+;; PROTOCOL ADMINISTRATION FUNCTIONS
+
+;; Mark Loan as Defaulted
+;; Administrative function for handling overdue loans with automated penalties
+;; Triggers credit score reduction and collateral forfeiture for protocol protection
+(define-public (mark-loan-defaulted (loan-id uint))
+  (let ((loan (unwrap! (map-get? Loans { loan-id: loan-id }) ERR-LOAN-NOT-FOUND)))
+    ;; Administrative Authorization & Timing Validation
+    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-UNAUTHORIZED)
+    (asserts! (>= stacks-block-height (get due-height loan)) ERR-NOT-DUE)
+    (asserts! (get is-active loan) ERR-LOAN-NOT-FOUND)
+    (asserts! (<= loan-id (var-get next-loan-id)) ERR-INVALID-LOAN-ID)
+    
+    ;; Loan Default Processing
+    (map-set Loans { loan-id: loan-id }
+      (merge loan {
+        is-defaulted: true,
+        is-active: false,
+      })
+    )
+    
+    ;; Credit Score Penalty Application
+    (try! (update-credit-score (get borrower loan) false loan))
+    
+    (ok true)
+  )
+)
